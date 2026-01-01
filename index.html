@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-cn">
 <head>
@@ -148,6 +149,7 @@ in vec4 v_sq_trans_inv;
 in vec2 v_texture_offset;
 
 uniform sampler2D number_tex;
+uniform vec3 u_resolution;
 
 out vec4 outColor;
 
@@ -169,19 +171,23 @@ const float PI = 3.14159265358979;
 const float border = 0.5558929702514214;
 
 void main(){
-    vec2 pos_in_tile = hyperbolic_transform(v_sq_inv, v_pos);
-    vec2 pos_klein = pos_in_tile * 2.0 / (1.0 + pos_in_tile.x * pos_in_tile.x + pos_in_tile.y * pos_in_tile.y);
+    vec2 pos_tile = hyperbolic_transform(v_sq_inv, v_pos);
+    vec2 pos_klein = pos_tile * 2.0 / (1.0 + dot(pos_tile, pos_tile));
     float max_dist = pos_klein.x;
     for(int i = 1; i < 5; i++){
         max_dist = max(max_dist, dot(pos_klein, vec2(cos(PI * 0.4 * float(i)), sin(PI * 0.4 * float(i)))));
     }
-    if(max_dist > border - 0.03){
-        outColor = vec4(vec3(0xcb, 0xd5, 0xe1) / 255.0, 1.0);
-    }else{
-        vec2 pos_in_tile_trans = hyperbolic_transform(v_sq_trans_inv, v_pos);
-        vec3 tile_color = texture(number_tex, pos_in_tile_trans * 0.3125 + v_texture_offset).rgb;
-        outColor = vec4(tile_color, 1);
-    }
+
+    float eps_pixel = 2.0 / u_resolution.z;
+    float eps = eps_pixel * 2.0 / (1.0 - dot(v_pos, v_pos));
+    float dx = eps * (1.0 - border * border);
+
+    vec3 border_color = vec3(0xcb, 0xd5, 0xe1) / 255.0;
+    vec2 pos_tile_trans = hyperbolic_transform(v_sq_trans_inv, v_pos);
+    vec3 tile_color = texture(number_tex, pos_tile_trans * 0.3125 + v_texture_offset).rgb;
+
+    float t = smoothstep(0., dx, border - 0.03 - max_dist);
+    outColor = vec4(mix(border_color, tile_color, t), 1);
 }
 </script>
 <script>
@@ -466,7 +472,7 @@ gl.activeTexture(gl.TEXTURE0)
 const status_tex = createAndSetupTexture(gl)
 gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, 4, 1, 0, gl.RED_INTEGER, gl.SHORT, new Int16Array(4))
 gl.activeTexture(gl.TEXTURE1)
-const number_tex = createAndSetupTexture(gl, gl.CLAMP_TO_EDGE, gl.LINEAR)
+const number_tex = createAndSetupTexture(gl)
 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0x64, 0x74, 0x8b, 0xff]))
 gl.uniform1i(gl.getUniformLocation(program, "status_tex"), 0)
 gl.uniform1i(gl.getUniformLocation(program, "number_tex"), 1)
@@ -475,6 +481,10 @@ img.src = tile_url
 img.onload = () => {
     gl.activeTexture(gl.TEXTURE1)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img)
+    gl.generateMipmap(gl.TEXTURE_2D)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 9)
     need_redraw = true
 }
 
