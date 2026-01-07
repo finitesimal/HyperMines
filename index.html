@@ -185,7 +185,8 @@ void main(){
     vec2 pos_tile_trans = hyperbolic_transform(v_sq_trans_inv, v_pos);
     vec3 tile_color = texture(number_tex, pos_tile_trans * 0.3125 + v_texture_offset).rgb;
 
-    float t = smoothstep(0., dx, border - 0.03 - max_dist);
+    //float t = smoothstep(0., dx, border - 0.03 - max_dist);
+    float t = clamp(border - 0.03 - max_dist, 0.0, dx) / dx;
     outColor = vec4(mix(border_color, tile_color, t), 1);
 }
 </script>
