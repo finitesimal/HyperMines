@@ -851,7 +851,7 @@ class Game{
         let mouse_rotate = false
         let old_mouse_pos_px = [0, 0]
 
-        const clamp_radius = 0.975
+        const clamp_radius = 0.95
         const move_epsilon = 8
         function out_bound(pos){
             return Math.hypot(...pos) > clamp_radius
@@ -875,7 +875,7 @@ class Game{
                 return
             }
             old_mouse_pos_px = [e.offsetX, e.offsetY]
-            const pos = this.px_to_disk(old_mouse_pos_px)
+            const pos = this.offset_px_to_disk(old_mouse_pos_px)
             mouse_down = true
             mouse_rotate = out_bound(pos)
             if(e.buttons === 1 && !mouse_rotate){
@@ -909,8 +909,8 @@ class Game{
             }
             this.highlight(-1)
             const render_data = this.render_data
-            const new_pos = this.px_to_disk(new_pos_px)
-            const old_pos = this.px_to_disk(old_mouse_pos_px)
+            const new_pos = this.offset_px_to_disk(new_pos_px)
+            const old_pos = this.offset_px_to_disk(old_mouse_pos_px)
             if(mouse_rotate){
                 const t1 = Math.atan2(new_pos[1], new_pos[0])
                 const t0 = Math.atan2(old_pos[1], old_pos[0])
@@ -933,7 +933,7 @@ class Game{
             }
             this.highlight(-1)
             if(mouse_action !== null){
-                const pos = this.px_to_disk(old_mouse_pos_px)
+                const pos = this.offset_px_to_disk(old_mouse_pos_px)
                 const idx = this.find_tile(pos)
                 this.action(idx, mouse_action)
             }
@@ -965,6 +965,142 @@ class Game{
             }
         })
 
+        let touch_idx = 0
+        let touch_down = false
+        let touch_rotate = false
+        let touch_static = false
+
+        let old_touch_pos_px = [0, 0]
+        let old_touch_dist_px = 0
+        function get_touch_dist(t1, t2){
+            return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
+        }
+        canvas.addEventListener("touchstart", e => {
+            e.preventDefault()
+            if(this.render_data === null){
+                return
+            }
+            if(this.render_data.minesweeper.win){
+                return
+            }
+            if (e.touches.length === 1) {
+                old_touch_pos_px = [e.touches[0].clientX, e.touches[0].clientY]
+                const pos = this.client_px_to_disk(old_touch_pos_px)
+                touch_idx += 1
+                touch_down = true
+                touch_rotate = out_bound(pos)
+                touch_static = !touch_rotate
+                if(touch_static){
+                    this.highlight(this.find_tile(pos))
+                    const callback_idx = touch_idx
+                    setTimeout(() => {
+                        if(touch_idx === callback_idx && touch_down && touch_static && !touch_rotate){
+                            touch_down = false
+                            touch_static = false
+                            this.highlight(-1)
+                            const tile_idx = this.find_tile(pos)
+                            this.action(tile_idx, "r")
+                        }
+                    }, 333)
+                }
+            } else if (e.touches.length === 2) {
+                touch_down = false
+                touch_static = false
+                this.highlight(-1)
+                old_touch_dist_px = get_touch_dist(e.touches[0], e.touches[1])
+            } else {
+                touch_down = false
+                touch_static = false
+                this.highlight(-1)
+            }
+        }, {
+            passive: false
+        })
+        canvas.addEventListener("touchmove", e => {
+            e.preventDefault()
+            if(this.render_data === null){
+                return
+            }
+            if(this.render_data.minesweeper.win){
+                return
+            }
+            const render_data = this.render_data
+            if (e.touches.length === 1 && touch_down) {
+                const new_touch_pos_px = [e.touches[0].clientX, e.touches[0].clientY]
+                const new_pos = this.client_px_to_disk(new_touch_pos_px)
+                const old_pos = this.client_px_to_disk(old_touch_pos_px)
+                // 长按防止移动
+                if(touch_static && Math.hypot(new_touch_pos_px[0] - old_touch_pos_px[0], new_touch_pos_px[1] - old_touch_pos_px[1]) < move_epsilon){
+                    return
+                }
+                if(touch_rotate){
+                    const t1 = Math.atan2(new_pos[1], new_pos[0])
+                    const t0 = Math.atan2(old_pos[1], old_pos[0])
+                    render_data.quat = Quat.rotate(t1 - t0).times(render_data.quat)
+                }else{
+                    const delta_quat = Quat.move_from_to(clamp_to_radius(old_pos), clamp_to_radius(new_pos))
+                    render_data.quat = delta_quat.times(render_data.quat)
+                }
+                old_touch_pos_px = new_touch_pos_px
+            } else if (e.touches.length === 2) {
+                const current_dist = get_touch_dist(e.touches[0], e.touches[1])
+                if(old_touch_dist_px > 0){
+                    const ratio = current_dist / old_touch_dist_px
+                    render_data.scale *= ratio
+                    render_data.scale = Math.max(0.25, render_data.scale)
+                    render_data.scale = Math.min(4, render_data.scale)
+                }
+                old_touch_dist_px = current_dist
+            }
+            touch_static = false
+            this.highlight(-1)
+            render_data.update = true
+        }, {
+            passive: false
+        })
+
+        canvas.addEventListener("touchend", e => {
+            e.preventDefault()
+            if(this.render_data === null){
+                return
+            }
+            if(this.render_data.minesweeper.win){
+                return
+            }
+            if (e.touches.length === 0) {
+                if(touch_down && touch_static){
+                    const pos = this.client_px_to_disk(old_touch_pos_px)
+                    const tile_idx = this.find_tile(pos)
+                    this.action(tile_idx, "l")
+                }
+                touch_down = false
+                touch_rotate = false
+                old_touch_dist_px = 0
+            } else if (e.touches.length === 1) {
+                old_touch_pos_px = [e.touches[0].clientX, e.touches[0].clientY]
+                const pos = this.client_px_to_disk(old_touch_pos_px)
+                touch_idx += 1
+                touch_down = true
+                touch_rotate = out_bound(pos)
+            } else if(e.touches.length === 2) {
+                touch_down = false
+                old_touch_dist_px = get_touch_dist(e.touches[0], e.touches[1])
+            } else {
+                touch_down = false
+            }
+            touch_static = false
+            this.highlight(-1)
+        }, {
+            passive: false
+        })
+
+        canvas.addEventListener("touchcancel", e => {
+            touch_down = false
+            touch_static = false
+            old_touch_dist_px = 0
+            this.highlight(-1)
+        })
+
 
         const resize = () => {
             const width = window.innerWidth
@@ -990,13 +1126,23 @@ class Game{
         window.addEventListener("resize", resize)
         window.addEventListener("load", resize)
     }
-    px_to_disk(pos_px){
+    offset_px_to_disk(pos_px){
         const [x, y] = pos_px
         const canvas = this.canvas
         const r = this.render_data.scale * Math.min(canvas.width, canvas.height) / 2
         return [
             (x / canvas.clientWidth * canvas.width - canvas.width / 2) / r,
             -(y / canvas.clientHeight * canvas.height - canvas.height / 2) / r
+        ]
+    }
+    client_px_to_disk(pos_px){
+        const [x, y] = pos_px
+        const canvas = this.canvas
+        const r = this.render_data.scale * Math.min(canvas.width, canvas.height) / 2
+        const rect = canvas.getBoundingClientRect()
+        return [
+            ((x - rect.left) / canvas.clientWidth * canvas.width - canvas.width / 2) / r,
+            -((y - rect.top) / canvas.clientHeight * canvas.height - canvas.height / 2) / r
         ]
     }
     find_tile(pos){
@@ -1084,7 +1230,7 @@ class Game{
         // 生成扫雷
         const minesweeper = new Minesweeper(quotient_neighbor, mine_num)
         // 显示用的变换
-        const quat = Quat.rotate(Math.random() * 2 * Math.PI).times(Quat.move(Math.random() * 0.5)).times(Quat.rotate(Math.random() * 2 * Math.PI))
+        const quat = Quat.rotate(Math.random() * 2 * Math.PI).times(Quat.move(Math.random() * 1)).times(Quat.rotate(Math.random() * 2 * Math.PI))
         // 显示用的数字映射到扫雷的数字
         const quotient_num = quotient_neighbor.length
         const quotient_map = new Array(quotient_num).fill(0).map((x, i) => i)
@@ -1437,9 +1583,9 @@ input.invalid {
 <div class="panel" id="menu">
 <h1>双曲流形扫雷 2</h1>
 <ul class="guide">
-<li>鼠标左键：翻开格子</li>
-<li>鼠标右键：插旗标记</li>
-<li>鼠标滚轮：缩放界面</li>
+<li>鼠标左键/触屏短按：翻开格子</li>
+<li>鼠标右键/触屏长按：插旗标记</li>
+<li>鼠标滚轮/触屏双指：缩放界面</li>
 </ul>
 <div class="settings">
 <label>大小<select id="size"></select></label>
